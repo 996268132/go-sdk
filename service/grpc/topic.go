@@ -16,12 +16,12 @@ package grpc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"mime"
 	"strings"
 
 	"github.com/golang/protobuf/ptypes/empty"
-	"github.com/pkg/errors"
 
 	runtimev1pb "github.com/dapr/go-sdk/dapr/proto/runtime/v1"
 	"github.com/dapr/go-sdk/service/common"
@@ -33,11 +33,8 @@ func (s *Server) AddTopicEventHandler(sub *common.Subscription, fn common.TopicE
 	if sub == nil {
 		return errors.New("subscription required")
 	}
-	if err := s.topicRegistrar.AddSubscription(sub, fn); err != nil {
-		return err
-	}
 
-	return nil
+	return s.topicRegistrar.AddSubscription(sub, fn)
 }
 
 // ListTopicSubscriptions is called by Dapr to get the list of topics in a pubsub component the app wants to subscribe to.
@@ -150,7 +147,7 @@ func (s *Server) OnTopicEvent(ctx context.Context, in *runtimev1pb.TopicEventReq
 		if retry {
 			return &runtimev1pb.TopicEventResponse{Status: runtimev1pb.TopicEventResponse_RETRY}, err
 		}
-		return &runtimev1pb.TopicEventResponse{Status: runtimev1pb.TopicEventResponse_DROP}, err
+		return &runtimev1pb.TopicEventResponse{Status: runtimev1pb.TopicEventResponse_DROP}, nil
 	}
 	return &runtimev1pb.TopicEventResponse{Status: runtimev1pb.TopicEventResponse_RETRY}, fmt.Errorf(
 		"pub/sub and topic combination not configured: %s/%s",

@@ -311,7 +311,7 @@ func TestActorHandler(t *testing.T) {
 	makeRequest(t, s, "/actors/testActorType/testActorID/method/timer/testTimerName", string(timerReqData), http.MethodPut, http.StatusNotFound)
 
 	// register test actor factory
-	s.RegisterActorImplFactory(mock.ActorImplFactory)
+	s.RegisterActorImplFactoryContext(mock.ActorImplFactoryCtx)
 
 	// invoke actor API with internal error
 	makeRequest(t, s, "/actors/testActorType/testActorID/method/remind/testReminderName", `{
@@ -328,24 +328,30 @@ func TestActorHandler(t *testing.T) {
 	makeRequest(t, s, "/actors/testActorType/testActorID", "", http.MethodDelete, http.StatusOK)
 
 	// register not reminder callee actor factory
-	s.RegisterActorImplFactory(mock.NotReminderCalleeActorFactory)
+	s.RegisterActorImplFactoryContext(mock.NotReminderCalleeActorFactory)
 	// invoke call reminder to not reminder callee actor type
 	makeRequest(t, s, "/actors/testActorNotReminderCalleeType/testActorID/method/remind/testReminderName", string(reminderReqData), http.MethodPut, http.StatusInternalServerError)
 }
 
 func makeRequest(t *testing.T, s *Server, route, data, method string, expectedStatusCode int) {
+	t.Helper()
+
 	req, err := http.NewRequest(method, route, strings.NewReader(data))
 	assert.NoErrorf(t, err, "error creating request: %s", data)
 	testRequest(t, s, req, expectedStatusCode)
 }
 
 func makeRequestWithExpectedBody(t *testing.T, s *Server, route, data, method string, expectedStatusCode int, expectedBody []byte) {
+	t.Helper()
+
 	req, err := http.NewRequest(method, route, strings.NewReader(data))
 	assert.NoErrorf(t, err, "error creating request: %s", data)
 	testRequestWithResponseBody(t, s, req, expectedStatusCode, expectedBody)
 }
 
 func makeEventRequest(t *testing.T, s *Server, route, data string, expectedStatusCode int) {
+	t.Helper()
+
 	req, err := http.NewRequest(http.MethodPost, route, strings.NewReader(data))
 	assert.NoErrorf(t, err, "error creating request: %s", data)
 	req.Header.Set("Content-Type", "application/json")

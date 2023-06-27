@@ -14,8 +14,10 @@ limitations under the License.
 package client
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -25,8 +27,8 @@ import (
 
 	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/google/uuid"
-	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
@@ -85,7 +87,7 @@ func TestNewClient(t *testing.T) {
 	t.Run("new client closed with token", func(t *testing.T) {
 		t.Setenv(apiTokenEnvVarName, "test")
 		c, err := NewClientWithSocket(testSocket)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		defer c.Close()
 		c.WithAuthToken("")
 	})
@@ -101,21 +103,21 @@ func TestNewClient(t *testing.T) {
 	t.Run("new socket client closed with token", func(t *testing.T) {
 		t.Setenv(apiTokenEnvVarName, "test")
 		c, err := NewClientWithSocket(testSocket)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		defer c.Close()
 		c.WithAuthToken("")
 	})
 
 	t.Run("new socket client closed with empty token", func(t *testing.T) {
 		c, err := NewClientWithSocket(testSocket)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		defer c.Close()
 		c.WithAuthToken("")
 	})
 
 	t.Run("new socket client with trace ID", func(t *testing.T) {
 		c, err := NewClientWithSocket(testSocket)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		defer c.Close()
 		ctx := c.WithTraceID(context.Background(), "")
 		_ = c.WithTraceID(ctx, "test")
@@ -197,33 +199,33 @@ func getTestClientWithSocket(ctx context.Context) (client Client, closer func())
 
 func Test_getClientTimeoutSeconds(t *testing.T) {
 	t.Run("empty env var", func(t *testing.T) {
-		os.Setenv(clientTimoutSecondsEnvVarName, "")
+		t.Setenv(clientTimeoutSecondsEnvVarName, "")
 		got, err := getClientTimeoutSeconds()
 		assert.NoError(t, err)
-		assert.Equal(t, clientDefaultTimoutSeconds, got)
+		assert.Equal(t, clientDefaultTimeoutSeconds, got)
 	})
 
 	t.Run("invalid env var", func(t *testing.T) {
-		os.Setenv(clientTimoutSecondsEnvVarName, "invalid")
+		t.Setenv(clientTimeoutSecondsEnvVarName, "invalid")
 		_, err := getClientTimeoutSeconds()
 		assert.Error(t, err)
 	})
 
 	t.Run("normal env var", func(t *testing.T) {
-		os.Setenv(clientTimoutSecondsEnvVarName, "7")
+		t.Setenv(clientTimeoutSecondsEnvVarName, "7")
 		got, err := getClientTimeoutSeconds()
 		assert.NoError(t, err)
 		assert.Equal(t, 7, got)
 	})
 
 	t.Run("zero env var", func(t *testing.T) {
-		os.Setenv(clientTimoutSecondsEnvVarName, "0")
+		t.Setenv(clientTimeoutSecondsEnvVarName, "0")
 		_, err := getClientTimeoutSeconds()
 		assert.Error(t, err)
 	})
 
 	t.Run("negative env var", func(t *testing.T) {
-		os.Setenv(clientTimoutSecondsEnvVarName, "-3")
+		t.Setenv(clientTimeoutSecondsEnvVarName, "-3")
 		_, err := getClientTimeoutSeconds()
 		assert.Error(t, err)
 	})
@@ -340,6 +342,26 @@ func (s *testDaprServer) PublishEvent(ctx context.Context, req *pb.PublishEventR
 	return &empty.Empty{}, nil
 }
 
+// BulkPublishEventAlpha1 mocks the BulkPublishEventAlpha1 API.
+// It will fail to publish events that start with "fail".
+// It will fail the entire request if an event starts with "failall".
+func (s *testDaprServer) BulkPublishEventAlpha1(ctx context.Context, req *pb.BulkPublishRequest) (*pb.BulkPublishResponse, error) {
+	failedEntries := make([]*pb.BulkPublishResponseFailedEntry, 0)
+	for _, entry := range req.Entries {
+		if bytes.HasPrefix(entry.Event, []byte("failall")) {
+			// fail the entire request
+			return nil, errors.New("failed to publish events")
+		} else if bytes.HasPrefix(entry.Event, []byte("fail")) {
+			// fail this entry
+			failedEntries = append(failedEntries, &pb.BulkPublishResponseFailedEntry{
+				EntryId: entry.EntryId,
+				Error:   "failed to publish events",
+			})
+		}
+	}
+	return &pb.BulkPublishResponse{FailedEntries: failedEntries}, nil
+}
+
 func (s *testDaprServer) InvokeBinding(ctx context.Context, req *pb.InvokeBindingRequest) (*pb.InvokeBindingResponse, error) {
 	if req.Data == nil {
 		return &pb.InvokeBindingResponse{
@@ -403,7 +425,7 @@ func (s *testDaprServer) Shutdown(ctx context.Context, req *empty.Empty) (*empty
 	return &empty.Empty{}, nil
 }
 
-func (s *testDaprServer) GetConfigurationAlpha1(ctx context.Context, in *pb.GetConfigurationRequest) (*pb.GetConfigurationResponse, error) {
+func (s *testDaprServer) GetConfiguration(ctx context.Context, in *pb.GetConfigurationRequest) (*pb.GetConfigurationResponse, error) {
 	if in.GetStoreName() == "" {
 		return &pb.GetConfigurationResponse{}, errors.New("store name notfound")
 	}
@@ -418,12 +440,20 @@ func (s *testDaprServer) GetConfigurationAlpha1(ctx context.Context, in *pb.GetC
 	}, nil
 }
 
-func (s *testDaprServer) SubscribeConfigurationAlpha1(in *pb.SubscribeConfigurationRequest, server pb.Dapr_SubscribeConfigurationAlpha1Server) error {
+func (s *testDaprServer) SubscribeConfiguration(in *pb.SubscribeConfigurationRequest, server pb.Dapr_SubscribeConfigurationServer) error {
 	stopCh := make(chan struct{})
 	id, _ := uuid.NewUUID()
 	s.configurationSubscriptionIDMapLoc.Lock()
 	s.configurationSubscriptionID[id.String()] = stopCh
 	s.configurationSubscriptionIDMapLoc.Unlock()
+
+	// Send subscription ID in the first response.
+	if err := server.Send(&pb.SubscribeConfigurationResponse{
+		Id: id.String(),
+	}); err != nil {
+		return err
+	}
+
 	for i := 0; i < 5; i++ {
 		select {
 		case <-stopCh:
@@ -447,7 +477,7 @@ func (s *testDaprServer) SubscribeConfigurationAlpha1(in *pb.SubscribeConfigurat
 	return nil
 }
 
-func (s *testDaprServer) UnsubscribeConfigurationAlpha1(ctx context.Context, in *pb.UnsubscribeConfigurationRequest) (*pb.UnsubscribeConfigurationResponse, error) {
+func (s *testDaprServer) UnsubscribeConfiguration(ctx context.Context, in *pb.UnsubscribeConfigurationRequest) (*pb.UnsubscribeConfigurationResponse, error) {
 	s.configurationSubscriptionIDMapLoc.Lock()
 	defer s.configurationSubscriptionIDMapLoc.Unlock()
 	ch, ok := s.configurationSubscriptionID[in.Id]

@@ -2,10 +2,9 @@ package client
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
-
-	"go.uber.org/atomic"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -45,56 +44,47 @@ func TestGetConfigurationItems(t *testing.T) {
 func TestSubscribeConfigurationItems(t *testing.T) {
 	ctx := context.Background()
 
-	counter := 0
-	totalCounter := 0
+	var counter, totalCounter uint32
+	counter = 0
+	totalCounter = 0
 	keys := []string{"mykey1", "mykey2", "mykey3"}
 	t.Run("Test subscribe configuration items", func(t *testing.T) {
-		err := testClient.SubscribeConfigurationItems(ctx, "example-config",
+		_, err := testClient.SubscribeConfigurationItems(ctx, "example-config",
 			keys, func(s string, items map[string]*ConfigurationItem) {
-				counter++
+				atomic.AddUint32(&counter, 1)
 				for _, k := range keys {
 					assert.Equal(t, k+valueSuffix, items[k].Value)
-					totalCounter++
+					atomic.AddUint32(&totalCounter, 1)
 				}
 			})
 		assert.Nil(t, err)
 	})
 	time.Sleep(time.Second*5 + time.Millisecond*500)
-	assert.Equal(t, 5, counter)
-	assert.Equal(t, 15, totalCounter)
+	assert.Equal(t, uint32(5), atomic.LoadUint32(&counter))
+	assert.Equal(t, uint32(15), atomic.LoadUint32(&totalCounter))
 }
 
 func TestUnSubscribeConfigurationItems(t *testing.T) {
 	ctx := context.Background()
 
-	counter := atomic.Int32{}
-	totalCounter := atomic.Int32{}
+	var counter, totalCounter uint32
 	t.Run("Test unsubscribe configuration items", func(t *testing.T) {
-		subscribeID := ""
-		subscribeIDChan := make(chan string)
-		go func() {
-			keys := []string{"mykey1", "mykey2", "mykey3"}
-			err := testClient.SubscribeConfigurationItems(ctx, "example-config",
-				keys, func(id string, items map[string]*ConfigurationItem) {
-					counter.Inc()
-					for _, k := range keys {
-						assert.Equal(t, k+valueSuffix, items[k].Value)
-						totalCounter.Inc()
-					}
-					select {
-					case subscribeIDChan <- id:
-					default:
-					}
-				})
-			assert.Nil(t, err)
-		}()
-		subscribeID = <-subscribeIDChan
+		keys := []string{"mykey1", "mykey2", "mykey3"}
+		subscribeID, err := testClient.SubscribeConfigurationItems(ctx, "example-config",
+			keys, func(id string, items map[string]*ConfigurationItem) {
+				atomic.AddUint32(&counter, 1)
+				for _, k := range keys {
+					assert.Equal(t, k+valueSuffix, items[k].Value)
+					atomic.AddUint32(&totalCounter, 1)
+				}
+			})
+		assert.Nil(t, err)
 		time.Sleep(time.Second * 2)
 		time.Sleep(time.Millisecond * 500)
-		err := testClient.UnsubscribeConfigurationItems(ctx, "example-config", subscribeID)
+		err = testClient.UnsubscribeConfigurationItems(ctx, "example-config", subscribeID)
 		assert.Nil(t, err)
 	})
 	time.Sleep(time.Second * 5)
-	assert.Equal(t, 3, int(counter.Load()))
-	assert.Equal(t, 9, int(totalCounter.Load()))
+	assert.Equal(t, uint32(3), atomic.LoadUint32(&counter))
+	assert.Equal(t, uint32(9), atomic.LoadUint32(&totalCounter))
 }

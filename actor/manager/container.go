@@ -25,59 +25,86 @@ import (
 	dapr "github.com/dapr/go-sdk/client"
 )
 
+// Deprecated: use ActorContainerContext instead.
 type ActorContainer interface {
 	Invoke(methodName string, param []byte) ([]reflect.Value, actorErr.ActorErr)
+	//nolint:staticcheck // SA1019 Deprecated: use ActorContainerContext instead.
 	GetActor() actor.Server
-	Deactivate() error
 }
 
-// DefaultActorContainer contains actor instance and methods type info generated from actor.
+type ActorContainerContext interface {
+	Invoke(ctx context.Context, methodName string, param []byte) ([]reflect.Value, actorErr.ActorErr)
+	GetActor() actor.ServerContext
+}
+
+// DefaultActorContainer contains actor instance and methods type info
+// generated from actor.
+// Deprecated: use DefaultActorContainerContext instead.
 type DefaultActorContainer struct {
+	//nolint:staticcheck
+	actor actor.Server
+	ctx   *DefaultActorContainerContext
+}
+
+// DefaultActorContainerContext contains actor instance and methods type info
+// generated from actor.
+type DefaultActorContainerContext struct {
 	methodType map[string]*MethodType
-	actor      actor.Server
+	actor      actor.ServerContext
 	serializer codec.Codec
 }
 
 // NewDefaultActorContainer creates a new ActorContainer with provider impl actor and serializer.
+// Deprecated: use NewDefaultActorContainerContext instead.
+//
+//nolint:staticcheck
 func NewDefaultActorContainer(actorID string, impl actor.Server, serializer codec.Codec) (ActorContainer, actorErr.ActorErr) {
+	ctx, err := NewDefaultActorContainerContext(context.Background(), actorID, impl.WithContext(), serializer)
+	return &DefaultActorContainer{ctx: ctx.(*DefaultActorContainerContext), actor: impl}, err
+}
+
+// Deprecated: use NewDefaultActorContainerContext instead.
+func (d *DefaultActorContainer) GetActor() actor.Server {
+	return d.actor
+}
+
+// Invoke call actor method with given methodName and param.
+// Deprecated: use NewDefaultActorContainerContext instead.
+func (d *DefaultActorContainer) Invoke(methodName string, param []byte) ([]reflect.Value, actorErr.ActorErr) {
+	return d.ctx.Invoke(context.Background(), methodName, param)
+}
+
+// NewDefaultActorContainerContext is the same as NewDefaultActorContainer, but with initial context.
+func NewDefaultActorContainerContext(ctx context.Context, actorID string, impl actor.ServerContext, serializer codec.Codec) (ActorContainerContext, actorErr.ActorErr) {
 	impl.SetID(actorID)
 	daprClient, _ := dapr.NewClient()
 	// create state manager for this new actor
-	impl.SetStateManager(state.NewActorStateManager(impl.Type(), actorID, state.NewDaprStateAsyncProvider(daprClient)))
-	// move out for Activate param
-	/*err := impl.Activate()
+	impl.SetStateManager(state.NewActorStateManagerContext(impl.Type(), actorID, state.NewDaprStateAsyncProvider(daprClient)))
+	// save state of this actor
+	err := impl.SaveState(ctx)
 	if err != nil {
 		return nil, actorErr.ErrSaveStateFailed
 	}
-	// save state of this actor
-	err = impl.SaveState()
-	if err != nil {
-		return nil, actorErr.ErrSaveStateFailed
-	}*/
 	methodType, err := getAbsctractMethodMap(impl)
 	if err != nil {
 		log.Printf("failed to get absctract method map from registered provider, err = %s", err)
 		return nil, actorErr.ErrActorServerInvalid
 	}
-	return &DefaultActorContainer{
+	return &DefaultActorContainerContext{
 		methodType: methodType,
 		actor:      impl,
 		serializer: serializer,
 	}, actorErr.Success
 }
 
-func (d *DefaultActorContainer) GetActor() actor.Server {
-	return d.actor
-}
-
-// Invoke call actor method with given methodName and param.
-func (d *DefaultActorContainer) Invoke(methodName string, param []byte) ([]reflect.Value, actorErr.ActorErr) {
+// Invoke call actor method with given context, methodName and param.
+func (d *DefaultActorContainerContext) Invoke(ctx context.Context, methodName string, param []byte) ([]reflect.Value, actorErr.ActorErr) {
 	methodType, ok := d.methodType[methodName]
 	if !ok {
 		return nil, actorErr.ErrActorMethodNoFound
 	}
 	argsValues := make([]reflect.Value, 0)
-	argsValues = append(argsValues, reflect.ValueOf(d.actor), reflect.ValueOf(context.Background()))
+	argsValues = append(argsValues, reflect.ValueOf(d.actor), reflect.ValueOf(ctx))
 	if len(methodType.argsType) > 0 {
 		typ := methodType.argsType[0]
 		paramValue := reflect.New(typ)
@@ -91,6 +118,6 @@ func (d *DefaultActorContainer) Invoke(methodName string, param []byte) ([]refle
 	return returnValue, actorErr.Success
 }
 
-func (d *DefaultActorContainer) Deactivate() error {
-	return d.actor.Deactivate()
+func (d *DefaultActorContainerContext) GetActor() actor.ServerContext {
+	return d.actor
 }
