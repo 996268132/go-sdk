@@ -18,7 +18,7 @@ import (
 	"errors"
 	"fmt"
 
-	pb "github.com/dapr/go-sdk/dapr/proto/runtime/v1"
+	pb "github.com/dapr/dapr/pkg/proto/runtime/v1"
 )
 
 // LockRequest is the lock request object.
@@ -68,7 +68,7 @@ func (c *GRPCClient) TryLockAlpha1(ctx context.Context, storeName string, reques
 	}
 
 	return &LockResponse{
-		Success: resp.Success,
+		Success: resp.GetSuccess(),
 	}, nil
 }
 
@@ -94,7 +94,7 @@ func (c *GRPCClient) UnlockAlpha1(ctx context.Context, storeName string, request
 	}
 
 	return &UnlockResponse{
-		StatusCode: int32(resp.Status),
-		Status:     pb.UnlockResponse_Status_name[int32(resp.Status)],
+		StatusCode: int32(resp.GetStatus()),
+		Status:     pb.UnlockResponse_Status_name[int32(resp.GetStatus())],
 	}, nil
 }

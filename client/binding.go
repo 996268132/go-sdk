@@ -18,7 +18,7 @@ import (
 	"errors"
 	"fmt"
 
-	pb "github.com/dapr/go-sdk/dapr/proto/runtime/v1"
+	pb "github.com/dapr/dapr/pkg/proto/runtime/v1"
 )
 
 // InvokeBindingRequest represents binding invocation request.
@@ -61,15 +61,15 @@ func (c *GRPCClient) InvokeBinding(ctx context.Context, in *InvokeBindingRequest
 		Metadata:  in.Metadata,
 	}
 
-	resp, err := c.protoClient.InvokeBinding(c.withAuthToken(ctx), req)
+	resp, err := c.protoClient.InvokeBinding(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("error invoking binding %s/%s: %w", in.Name, in.Operation, err)
 	}
 
 	if resp != nil {
 		return &BindingEvent{
-			Data:     resp.Data,
-			Metadata: resp.Metadata,
+			Data:     resp.GetData(),
+			Metadata: resp.GetMetadata(),
 		}, nil
 	}
 

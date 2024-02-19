@@ -20,6 +20,48 @@ The Dapr client package allows you to interact with other Dapr applications from
 ```go
 import "github.com/dapr/go-sdk/client"
 ```
+## Error handling
+Dapr errors are based on [gRPC's richer error model](https://cloud.google.com/apis/design/errors#error_model). 
+The following code shows an example of how you can parse and handle the error details:
+
+```go
+if err != nil {
+    st := status.Convert(err)
+
+    fmt.Printf("Code: %s\n", st.Code().String())
+    fmt.Printf("Message: %s\n", st.Message())
+
+    for _, detail := range st.Details() {
+        switch t := detail.(type) {
+        case *errdetails.ErrorInfo:
+            // Handle ErrorInfo details
+            fmt.Printf("ErrorInfo:\n- Domain: %s\n- Reason: %s\n- Metadata: %v\n", t.GetDomain(), t.GetReason(), t.GetMetadata())
+        case *errdetails.BadRequest:
+            // Handle BadRequest details
+            fmt.Println("BadRequest:")
+            for _, violation := range t.GetFieldViolations() {
+                fmt.Printf("- Key: %s\n", violation.GetField())
+                fmt.Printf("- The %q field was wrong: %s\n", violation.GetField(), violation.GetDescription())
+            }
+        case *errdetails.ResourceInfo:
+            // Handle ResourceInfo details
+            fmt.Printf("ResourceInfo:\n- Resource type: %s\n- Resource name: %s\n- Owner: %s\n- Description: %s\n",
+                t.GetResourceType(), t.GetResourceName(), t.GetOwner(), t.GetDescription())
+        case *errdetails.Help:
+            // Handle ResourceInfo details
+            fmt.Println("HelpInfo:")
+            for _, link := range t.GetLinks() {
+                fmt.Printf("- Url: %s\n", link.Url)
+                fmt.Printf("- Description: %s\n", link.Description)
+            }
+        
+        default:
+            // Add cases for other types of details you expect
+            fmt.Printf("Unhandled error detail type: %v\n", t)
+        }
+    }
+}
+```
 
 ## Building blocks
 
@@ -142,8 +184,44 @@ meta := map[string]string{}
 err := testClient.ExecuteStateTransaction(ctx, store, meta, ops)
 ```
 
-For a full guide on state management, visit [How-To: Save & get state]({{< ref howto-get-save-state.md >}}).
+Retrieve, filter, and sort key/value data stored in your statestore using `QueryState`. 
 
+```go
+// Define the query string
+query := `{
+	"filter": {
+		"EQ": { "value.Id": "1" }
+	},
+	"sort": [
+		{
+			"key": "value.Balance",
+			"order": "DESC"
+		}
+	]
+}`
+
+// Use the client to query the state
+queryResponse, err := c.QueryState(ctx, "querystore", query)
+if err != nil {
+	log.Fatal(err)
+}
+
+fmt.Printf("Got %d\n", len(queryResponse))
+
+for _, account := range queryResponse {
+	var data Account
+	err := account.Unmarshal(&data)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Printf("Account: %s has %f\n", data.ID, data.Balance)
+}
+```
+
+> **Note:** Query state API is currently in alpha
+
+For a full guide on state management, visit [How-To: Save & get state]({{< ref howto-get-save-state.md >}}).
 
 ### Publish Messages
 To publish data onto a topic, the Dapr Go client provides a simple method:
@@ -155,9 +233,20 @@ if err := client.PublishEvent(ctx, "component-name", "topic-name", data); err !=
 }
 ```
 
+To publish multiple messages at once, the `PublishEvents` method can be used:
+
+```go
+events := []string{"event1", "event2", "event3"}
+res := client.PublishEvents(ctx, "component-name", "topic-name", events)
+if res.Error != nil {
+    panic(res.Error)
+}
+```
+
 For a full guide on pub/sub, visit [How-To: Publish & subscribe]({{< ref howto-publish-subscribe.md >}}).
 
 ### Output Bindings
+
 
 The Dapr Go client SDK provides two methods to invoke an operation on a Dapr-defined binding. Dapr supports input, output, and bidirectional bindings.
 
@@ -183,6 +272,67 @@ out, err := client.InvokeBinding(ctx, in)
 
 For a full guide on output bindings, visit [How-To: Use bindings]({{< ref howto-bindings.md >}}).
 
+### Actors
+
+Use the Dapr Go client SDK to write actors.
+
+```go
+// MyActor represents an example actor type.
+type MyActor struct {
+	actors.Actor
+}
+
+// MyActorMethod is a method that can be invoked on MyActor.
+func (a *MyActor) MyActorMethod(ctx context.Context, req *actors.Message) (string, error) {
+	log.Printf("Received message: %s", req.Data)
+	return "Hello from MyActor!", nil
+}
+
+func main() {
+	// Create a Dapr client
+	daprClient, err := client.NewClient()
+	if err != nil {
+		log.Fatal("Error creating Dapr client: ", err)
+	}
+
+	// Register the actor type with Dapr
+	actors.RegisterActor(&MyActor{})
+
+	// Create an actor client
+	actorClient := actors.NewClient(daprClient)
+
+	// Create an actor ID
+	actorID := actors.NewActorID("myactor")
+
+	// Get or create the actor
+	err = actorClient.SaveActorState(context.Background(), "myactorstore", actorID, map[string]interface{}{"data": "initial state"})
+	if err != nil {
+		log.Fatal("Error saving actor state: ", err)
+	}
+
+	// Invoke a method on the actor
+	resp, err := actorClient.InvokeActorMethod(context.Background(), "myactorstore", actorID, "MyActorMethod", &actors.Message{Data: []byte("Hello from client!")})
+	if err != nil {
+		log.Fatal("Error invoking actor method: ", err)
+	}
+
+	log.Printf("Response from actor: %s", resp.Data)
+
+	// Wait for a few seconds before terminating
+	time.Sleep(5 * time.Second)
+
+	// Delete the actor
+	err = actorClient.DeleteActor(context.Background(), "myactorstore", actorID)
+	if err != nil {
+		log.Fatal("Error deleting actor: ", err)
+	}
+
+	// Close the Dapr client
+	daprClient.Close()
+}
+```
+
+For a full guide on actors, visit [the Actors building block documentation]({{< ref actors >}}).
 
 ### Secret Management
 
@@ -196,7 +346,7 @@ opt := map[string]string{
 secret, err := client.GetSecret(ctx, "store-name", "secret-name", opt)
 ```
 
-#### Authentication
+### Authentication
 
 By default, Dapr relies on the network boundary to limit access to its API. If however the target Dapr API is configured with token-based authentication, users can configure the Go Dapr client with that token in two ways:
 
@@ -296,7 +446,7 @@ To encrypt:
 
 ```go
 // Encrypt the data using Dapr
-out, err := sdkClient.Encrypt(context.Background(), rf, dapr.EncryptOptions{
+out, err := client.Encrypt(context.Background(), rf, dapr.EncryptOptions{
 	// These are the 3 required parameters
 	ComponentName: "mycryptocomponent",
 	KeyName:        "mykey",
@@ -311,7 +461,7 @@ To decrypt:
 
 ```go
 // Decrypt the data using Dapr
-out, err := sdkClient.Decrypt(context.Background(), rf, dapr.EncryptOptions{
+out, err := client.Decrypt(context.Background(), rf, dapr.EncryptOptions{
 	// Only required option is the component name
 	ComponentName: "mycryptocomponent",
 })

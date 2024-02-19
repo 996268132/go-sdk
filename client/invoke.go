@@ -20,10 +20,10 @@ import (
 	"fmt"
 	"strings"
 
-	anypb "github.com/golang/protobuf/ptypes/any"
+	"google.golang.org/protobuf/types/known/anypb"
 
-	v1 "github.com/dapr/go-sdk/dapr/proto/common/v1"
-	pb "github.com/dapr/go-sdk/dapr/proto/runtime/v1"
+	v1 "github.com/dapr/dapr/pkg/proto/common/v1"
+	pb "github.com/dapr/dapr/pkg/proto/runtime/v1"
 )
 
 // DataContent the service invocation content.
@@ -39,14 +39,14 @@ func (c *GRPCClient) invokeServiceWithRequest(ctx context.Context, req *pb.Invok
 		return nil, errors.New("nil request")
 	}
 
-	resp, err := c.protoClient.InvokeService(c.withAuthToken(ctx), req)
+	resp, err := c.protoClient.InvokeService(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 
 	// allow for service to not return any value
 	if resp != nil && resp.GetData() != nil {
-		out = resp.GetData().Value
+		out = resp.GetData().GetValue()
 		return
 	}
 

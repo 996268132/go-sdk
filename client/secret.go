@@ -18,7 +18,7 @@ import (
 	"errors"
 	"fmt"
 
-	pb "github.com/dapr/go-sdk/dapr/proto/runtime/v1"
+	pb "github.com/dapr/dapr/pkg/proto/runtime/v1"
 )
 
 // GetSecret retrieves preconfigured secret from specified store using key.
@@ -36,7 +36,7 @@ func (c *GRPCClient) GetSecret(ctx context.Context, storeName, key string, meta 
 		Metadata:  meta,
 	}
 
-	resp, err := c.protoClient.GetSecret(c.withAuthToken(ctx), req)
+	resp, err := c.protoClient.GetSecret(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("error invoking service: %w", err)
 	}
@@ -59,7 +59,7 @@ func (c *GRPCClient) GetBulkSecret(ctx context.Context, storeName string, meta m
 		Metadata:  meta,
 	}
 
-	resp, err := c.protoClient.GetBulkSecret(c.withAuthToken(ctx), req)
+	resp, err := c.protoClient.GetBulkSecret(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("error invoking service: %w", err)
 	}
@@ -67,10 +67,10 @@ func (c *GRPCClient) GetBulkSecret(ctx context.Context, storeName string, meta m
 	if resp != nil {
 		data = map[string]map[string]string{}
 
-		for secretName, secretResponse := range resp.Data {
+		for secretName, secretResponse := range resp.GetData() {
 			data[secretName] = map[string]string{}
 
-			for k, v := range secretResponse.Secrets {
+			for k, v := range secretResponse.GetSecrets() {
 				data[secretName][k] = v
 			}
 		}

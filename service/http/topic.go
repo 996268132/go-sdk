@@ -19,6 +19,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -65,6 +66,52 @@ type topicEventJSON struct {
 	Topic string `json:"topic"`
 	// PubsubName is name of the pub/sub this message came from
 	PubsubName string `json:"pubsubname"`
+}
+
+func (in topicEventJSON) getData() (data any, rawData []byte) {
+	var (
+		err error
+		v   any
+	)
+	if len(in.Data) > 0 {
+		rawData = []byte(in.Data)
+		data = rawData
+		// We can assume that rawData is valid JSON
+		// without checking in.DataContentType == "application/json".
+		if err = json.Unmarshal(rawData, &v); err == nil {
+			data = v
+			// Handling of JSON base64 encoded or escaped in a string.
+			if str, ok := v.(string); ok {
+				// This is the path that will most likely succeed.
+				var (
+					vString any
+					decoded []byte
+				)
+				if err = json.Unmarshal([]byte(str), &vString); err == nil {
+					data = vString
+				} else if decoded, err = base64.StdEncoding.DecodeString(str); err == nil {
+					// Decoded Base64 encoded JSON does not seem to be in the spec
+					// but it is in existing unit tests so this handles that case.
+					var vBase64 any
+					if err = json.Unmarshal(decoded, &vBase64); err == nil {
+						data = vBase64
+					}
+				}
+			}
+		}
+	} else if in.DataBase64 != "" {
+		rawData, err = base64.StdEncoding.DecodeString(in.DataBase64)
+		if err == nil {
+			data = rawData
+			if in.DataContentType == "application/json" {
+				if err = json.Unmarshal(rawData, &v); err == nil {
+					data = v
+				}
+			}
+		}
+	}
+
+	return data, rawData
 }
 
 func (s *Server) registerBaseHandler() {
@@ -189,14 +236,25 @@ func (s *Server) AddTopicEventHandler(sub *common.Subscription, fn common.TopicE
 	s.mux.Handle(sub.Route, optionsHandler(http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
 			// check for post with no data
-			if r.ContentLength == 0 {
+			var (
+				body []byte
+				err  error
+			)
+			if r.Body != nil {
+				body, err = io.ReadAll(r.Body)
+				if err != nil {
+					http.Error(w, err.Error(), PubSubHandlerDropStatusCode)
+					return
+				}
+			}
+			if len(body) == 0 {
 				http.Error(w, "nil content", PubSubHandlerDropStatusCode)
 				return
 			}
 
 			// deserialize the event
 			var in topicEventJSON
-			if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			if err = json.Unmarshal(body, &in); err != nil {
 				http.Error(w, err.Error(), PubSubHandlerDropStatusCode)
 				return
 			}
@@ -208,46 +266,7 @@ func (s *Server) AddTopicEventHandler(sub *common.Subscription, fn common.TopicE
 				in.Topic = sub.Topic
 			}
 
-			var data interface{}
-			var rawData []byte
-			if len(in.Data) > 0 {
-				rawData = []byte(in.Data)
-				data = rawData
-				var v interface{}
-				// We can assume that rawData is valid JSON
-				// without checking in.DataContentType == "application/json".
-				if err := json.Unmarshal(rawData, &v); err == nil {
-					data = v
-					// Handling of JSON base64 encoded or escaped in a string.
-					if str, ok := v.(string); ok {
-						// This is the path that will most likely succeed.
-						var vString interface{}
-						if err := json.Unmarshal([]byte(str), &vString); err == nil {
-							data = vString
-						} else if decoded, err := base64.StdEncoding.DecodeString(str); err == nil {
-							// Decoded Base64 encoded JSON does not seem to be in the spec
-							// but it is in existing unit tests so this handles that case.
-							var vBase64 interface{}
-							if err := json.Unmarshal(decoded, &vBase64); err == nil {
-								data = vBase64
-							}
-						}
-					}
-				}
-			} else if in.DataBase64 != "" {
-				var err error
-				rawData, err = base64.StdEncoding.DecodeString(in.DataBase64)
-				if err == nil {
-					data = rawData
-					if in.DataContentType == "application/json" {
-						var v interface{}
-						if err := json.Unmarshal(rawData, &v); err == nil {
-							data = v
-						}
-					}
-				}
-			}
-
+			data, rawData := in.getData()
 			te := common.TopicEvent{
 				ID:              in.ID,
 				SpecVersion:     in.SpecVersion,
@@ -260,6 +279,7 @@ func (s *Server) AddTopicEventHandler(sub *common.Subscription, fn common.TopicE
 				Subject:         in.Subject,
 				PubsubName:      in.PubsubName,
 				Topic:           in.Topic,
+				Metadata:        getCustomMetdataFromHeaders(r),
 			}
 
 			w.Header().Add("Content-Type", "application/json")
@@ -281,6 +301,16 @@ func (s *Server) AddTopicEventHandler(sub *common.Subscription, fn common.TopicE
 		})))
 
 	return nil
+}
+
+func getCustomMetdataFromHeaders(r *http.Request) map[string]string {
+	md := make(map[string]string)
+	for k, v := range r.Header {
+		if strings.HasPrefix(strings.ToLower(k), "metadata.") {
+			md[k[9:]] = v[0]
+		}
+	}
+	return md
 }
 
 func writeStatus(w http.ResponseWriter, s string) {

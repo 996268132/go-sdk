@@ -22,8 +22,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
-	commonv1pb "github.com/dapr/go-sdk/dapr/proto/common/v1"
-	runtimev1pb "github.com/dapr/go-sdk/dapr/proto/runtime/v1"
+	commonv1pb "github.com/dapr/dapr/pkg/proto/common/v1"
+	runtimev1pb "github.com/dapr/dapr/pkg/proto/runtime/v1"
 )
 
 // Encrypt data read from a stream, returning a readable stream that receives the encrypted data.
@@ -186,13 +186,13 @@ func (c *GRPCClient) performCryptoOperation(ctx context.Context, stream grpc.Cli
 			// Write the data, if any, into the pipe
 			payload = resProto.GetPayload()
 			if payload != nil {
-				if payload.Seq != expectSeq {
-					pw.CloseWithError(fmt.Errorf("invalid sequence number in chunk: %d (expected: %d)", payload.Seq, expectSeq))
+				if payload.GetSeq() != expectSeq {
+					pw.CloseWithError(fmt.Errorf("invalid sequence number in chunk: %d (expected: %d)", payload.GetSeq(), expectSeq))
 					return
 				}
 				expectSeq++
 
-				_, readErr = pw.Write(payload.Data)
+				_, readErr = pw.Write(payload.GetData())
 				if readErr != nil {
 					pw.CloseWithError(fmt.Errorf("error writing data: %w", readErr))
 					return
