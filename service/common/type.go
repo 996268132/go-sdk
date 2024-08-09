@@ -15,6 +15,7 @@ package common
 
 import (
 	"encoding/json"
+	"net/http"
 )
 
 // TopicEvent is the content of the inbound topic message.
@@ -66,7 +67,8 @@ type InvocationEvent struct {
 	// Verb is the HTTP verb that was used to invoke this service.
 	Verb string `json:"-"`
 	// QueryString represents an encoded HTTP url query string in the following format: name=value&name2=value2
-	QueryString string `json:"-"`
+	QueryString string        `json:"-"`
+	Request     *http.Request `json:"-"`
 }
 
 // Content is a generic data content.

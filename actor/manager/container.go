@@ -30,6 +30,7 @@ type ActorContainer interface {
 	Invoke(methodName string, param []byte) ([]reflect.Value, actorErr.ActorErr)
 	//nolint:staticcheck // SA1019 Deprecated: use ActorContainerContext instead.
 	GetActor() actor.Server
+	Deactivate() error
 }
 
 type ActorContainerContext interface {
@@ -79,12 +80,17 @@ func NewDefaultActorContainerContext(ctx context.Context, actorID string, impl a
 	impl.SetID(actorID)
 	daprClient, _ := dapr.NewClient()
 	// create state manager for this new actor
-	impl.SetStateManager(state.NewActorStateManagerContext(impl.Type(), actorID, state.NewDaprStateAsyncProvider(daprClient)))
-	// save state of this actor
-	err := impl.SaveState(ctx)
+	impl.SetStateManager(state.NewActorStateManager(impl.Type(), actorID, state.NewDaprStateAsyncProvider(daprClient)))
+	// move out for Activate param
+	/*err := impl.Activate(ctx)
 	if err != nil {
 		return nil, actorErr.ErrSaveStateFailed
 	}
+	// save state of this actor
+	err = impl.SaveState()
+	if err != nil {
+		return nil, actorErr.ErrSaveStateFailed
+	}*/
 	methodType, err := getAbsctractMethodMap(impl)
 	if err != nil {
 		log.Printf("failed to get absctract method map from registered provider, err = %s", err)
@@ -116,6 +122,10 @@ func (d *DefaultActorContainerContext) Invoke(ctx context.Context, methodName st
 	}
 	returnValue := methodType.method.Func.Call(argsValues)
 	return returnValue, actorErr.Success
+}
+
+func (d *DefaultActorContainer) Deactivate() error {
+	return d.actor.Deactivate()
 }
 
 func (d *DefaultActorContainerContext) GetActor() actor.ServerContext {

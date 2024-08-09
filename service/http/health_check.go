@@ -38,7 +38,8 @@ func (s *Server) AddHealthCheckHandler(route string, fn common.HealthCheckHandle
 				return
 			}
 
-			w.WriteHeader(http.StatusNoContent)
+			// fix check fail on k8s, http.StatusNoContent -> http.StatusOK
+			w.WriteHeader(http.StatusOK)
 		})))
 
 	return nil

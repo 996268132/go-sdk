@@ -52,6 +52,8 @@ type ActorManager interface {
 	DeactivateActor(actorID string) actorErr.ActorErr
 	InvokeReminder(actorID, reminderName string, params []byte) actorErr.ActorErr
 	InvokeTimer(actorID, timerName string, params []byte) actorErr.ActorErr
+	InvokeActors(methodName string, request []byte) actorErr.ActorErr
+	KillAllActors() actorErr.ActorErr
 }
 
 type ActorManagerContext interface {
@@ -127,12 +129,21 @@ func (m *DefaultActorManagerContext) RegisterActorImplFactory(f actor.FactoryCon
 }
 
 // getAndCreateActorContainerIfNotExist will.
-func (m *DefaultActorManagerContext) getAndCreateActorContainerIfNotExist(ctx context.Context, actorID string) (ActorContainerContext, actorErr.ActorErr) {
+func (m *DefaultActorManagerContext) getAndCreateActorContainerIfNotExist(ctx context.Context, actorID, invokeName string) (ActorContainerContext, actorErr.ActorErr) {
 	val, ok := m.activeActors.Load(actorID)
 	if !ok {
 		newContainer, aerr := NewDefaultActorContainerContext(ctx, actorID, m.factory(), m.serializer)
 		if aerr != actorErr.Success {
 			return nil, aerr
+		}
+		err := newContainer.GetActor().Activate(invokeName)
+		if err != nil {
+			return nil, actorErr.ErrSaveStateFailed
+		}
+		// save state of this actor
+		err = newContainer.GetActor().SaveState()
+		if err != nil {
+			return nil, actorErr.ErrSaveStateFailed
 		}
 		m.activeActors.Store(actorID, newContainer)
 		val, _ = m.activeActors.Load(actorID)
@@ -146,7 +157,7 @@ func (m *DefaultActorManagerContext) InvokeMethod(ctx context.Context, actorID, 
 		return nil, actorErr.ErrActorFactoryNotSet
 	}
 
-	actorContainer, aerr := m.getAndCreateActorContainerIfNotExist(ctx, actorID)
+	actorContainer, aerr := m.getAndCreateActorContainerIfNotExist(ctx, actorID, methodName)
 	if aerr != actorErr.Success {
 		return nil, aerr
 	}
@@ -187,6 +198,7 @@ func (m *DefaultActorManagerContext) DeactivateActor(_ context.Context, actorID 
 	if !ok {
 		return actorErr.ErrActorIDNotFound
 	}
+	actor.(ActorContainer).Deactivate()
 	m.activeActors.Delete(actorID)
 	return actorErr.Success
 }
@@ -201,7 +213,7 @@ func (m *DefaultActorManagerContext) InvokeReminder(ctx context.Context, actorID
 		log.Printf("failed to unmarshal reminder param, err: %v ", err)
 		return actorErr.ErrRemindersParamsInvalid
 	}
-	actorContainer, aerr := m.getAndCreateActorContainerIfNotExist(ctx, actorID)
+	actorContainer, aerr := m.getAndCreateActorContainerIfNotExist(ctx, actorID, reminderName)
 	if aerr != actorErr.Success {
 		return aerr
 	}
@@ -224,12 +236,53 @@ func (m *DefaultActorManagerContext) InvokeTimer(ctx context.Context, actorID, t
 		log.Printf("failed to unmarshal reminder param, err: %v ", err)
 		return actorErr.ErrTimerParamsInvalid
 	}
-	actorContainer, aerr := m.getAndCreateActorContainerIfNotExist(ctx, actorID)
+	actorContainer, aerr := m.getAndCreateActorContainerIfNotExist(ctx, actorID, timerName)
 	if aerr != actorErr.Success {
 		return aerr
 	}
 	_, aerr = actorContainer.Invoke(ctx, timerParams.CallBack, timerParams.Data)
 	return aerr
+}
+
+func (m *DefaultActorManager) InvokeActors(methodName string, request []byte) actorErr.ActorErr {
+	m.activeActors.Range(func(key, value interface{}) bool {
+		return func() bool {
+			go func() {
+				defer func() {
+					if err := recover(); err != nil {
+						log.Printf("InvokeActors recover, methodName:%s, request:%s", methodName, string(request))
+					}
+				}()
+				out, err := m.InvokeMethod(key.(string), methodName, request)
+				if err != actorErr.Success {
+					log.Printf("InvokeActors, methodName:%s, request:%s, out:%s, err:%v", methodName, string(request), string(out), err)
+				}
+			}()
+			return true
+		}()
+	})
+	return actorErr.Success
+}
+
+func (m *DefaultActorManager) KillAllActors() actorErr.ActorErr {
+	var actorIds []string
+	m.activeActors.Range(func(key, value interface{}) bool {
+		return func() bool {
+			actorIds = append(actorIds, key.(string))
+			return true
+		}()
+	})
+	for _, actorId := range actorIds {
+		func() {
+			defer func() {
+				if err := recover(); err != nil {
+					log.Printf("KillAllActors recover, actorId:%s", actorId)
+				}
+			}()
+			m.DeactivateActor(actorId)
+		}()
+	}
+	return actorErr.Success
 }
 
 func getAbsctractMethodMap(rcvr interface{}) (map[string]*MethodType, error) {

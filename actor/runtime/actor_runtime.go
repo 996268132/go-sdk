@@ -16,6 +16,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 
 	"github.com/dapr/go-sdk/actor"
@@ -73,6 +74,10 @@ func (r *ActorRunTimeContext) RegisterActorFactory(f actor.FactoryContext, opt .
 	conf := config.GetConfigFromOptions(opt...)
 	actType := f().Type()
 	r.config.RegisteredActorTypes = append(r.config.RegisteredActorTypes, actType)
+	r.config.ActorIdleTimeout = conf.ActorIdleTimeout
+	r.config.ActorScanInterval = conf.ActorScanInterval
+	r.config.DrainOngingCallTimeout = conf.DrainOngingCallTimeout
+	r.config.DrainBalancedActors = conf.DrainBalancedActors
 	mng, ok := r.actorManagers.Load(actType)
 	if !ok {
 		newMng, err := manager.NewDefaultActorManagerContext(conf.SerializerType)
@@ -153,4 +158,21 @@ func (r *ActorRunTime) InvokeReminder(actorTypeName, actorID, reminderName strin
 // Deprecated: use ActorRunTimeContext instead.
 func (r *ActorRunTime) InvokeTimer(actorTypeName, actorID, timerName string, params []byte) actorErr.ActorErr {
 	return r.ctx.InvokeTimer(context.Background(), actorTypeName, actorID, timerName, params)
+}
+
+func (r *ActorRunTime) InvokeActors(actorType, methodName string, request []byte) actorErr.ActorErr {
+	mng, ok := r.actorManagers.Load(actorType)
+	if !ok {
+		return actorErr.ErrActorTypeNotFound
+	}
+	return mng.(manager.ActorManager).InvokeActors(methodName, request)
+}
+
+func (r *ActorRunTime) KillAllActors(actorTypeName string) actorErr.ActorErr {
+	fmt.Println("KillAllActors:", actorTypeName)
+	targetManager, ok := r.actorManagers.Load(actorTypeName)
+	if !ok {
+		return actorErr.ErrActorTypeNotFound
+	}
+	return targetManager.(manager.ActorManager).KillAllActors()
 }

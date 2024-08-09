@@ -9,6 +9,10 @@ import (
 	pb "github.com/dapr/dapr/pkg/proto/runtime/v1"
 )
 
+var (
+	ErrEmpty = errors.New("get configuration item result empty")
+)
+
 type ConfigurationItem struct {
 	Value    string
 	Version  string
@@ -29,7 +33,7 @@ func (c *GRPCClient) GetConfigurationItem(ctx context.Context, storeName, key st
 		return nil, err
 	}
 	if len(items) == 0 {
-		return nil, nil
+		return nil, ErrEmpty
 	}
 
 	return items[key], nil
