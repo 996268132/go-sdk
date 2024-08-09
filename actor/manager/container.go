@@ -80,7 +80,7 @@ func NewDefaultActorContainerContext(ctx context.Context, actorID string, impl a
 	impl.SetID(actorID)
 	daprClient, _ := dapr.NewClient()
 	// create state manager for this new actor
-	impl.SetStateManager(state.NewActorStateManager(impl.Type(), actorID, state.NewDaprStateAsyncProvider(daprClient)))
+	impl.SetStateManager(state.NewActorStateManagerContext(impl.Type(), actorID, state.NewDaprStateAsyncProvider(daprClient)))
 	// move out for Activate param
 	/*err := impl.Activate(ctx)
 	if err != nil {
