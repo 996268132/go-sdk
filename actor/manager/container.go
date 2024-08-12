@@ -36,6 +36,7 @@ type ActorContainer interface {
 type ActorContainerContext interface {
 	Invoke(ctx context.Context, methodName string, param []byte) ([]reflect.Value, actorErr.ActorErr)
 	GetActor() actor.ServerContext
+	Deactivate() error
 }
 
 // DefaultActorContainer contains actor instance and methods type info
@@ -53,6 +54,11 @@ type DefaultActorContainerContext struct {
 	methodType map[string]*MethodType
 	actor      actor.ServerContext
 	serializer codec.Codec
+}
+
+func (d *DefaultActorContainerContext) Deactivate() error {
+	//TODO implement me
+	return d.actor.Deactivate()
 }
 
 // NewDefaultActorContainer creates a new ActorContainer with provider impl actor and serializer.

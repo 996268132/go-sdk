@@ -28,7 +28,8 @@ import (
 
 // Deprecated: use ActorRunTimeContext instead.
 type ActorRunTime struct {
-	ctx *ActorRunTimeContext
+	ctx           *ActorRunTimeContext
+	actorManagers sync.Map
 }
 
 type ActorRunTimeContext struct {
@@ -128,6 +129,15 @@ func (r *ActorRunTimeContext) InvokeTimer(ctx context.Context, actorTypeName, ac
 	}
 	mng := targetManager.(manager.ActorManagerContext)
 	return mng.InvokeTimer(ctx, actorID, timerName, params)
+}
+
+func (r *ActorRunTimeContext) KillAllActors(actorTypeName string) actorErr.ActorErr {
+	fmt.Println("KillAllActors:", actorTypeName)
+	targetManager, ok := r.actorManagers.Load(actorTypeName)
+	if !ok {
+		return actorErr.ErrActorTypeNotFound
+	}
+	return targetManager.(manager.ActorManagerContext).KillAllActors()
 }
 
 // Deprecated: use ActorRunTimeContext instead.

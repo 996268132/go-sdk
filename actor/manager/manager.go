@@ -62,6 +62,8 @@ type ActorManagerContext interface {
 	DeactivateActor(ctx context.Context, actorID string) actorErr.ActorErr
 	InvokeReminder(ctx context.Context, actorID, reminderName string, params []byte) actorErr.ActorErr
 	InvokeTimer(ctx context.Context, actorID, timerName string, params []byte) actorErr.ActorErr
+	InvokeActors(methodName string, request []byte) actorErr.ActorErr
+	KillAllActors() actorErr.ActorErr
 }
 
 // DefaultActorManagerContext is to manage one type of actor.
@@ -80,6 +82,8 @@ type DefaultActorManagerContext struct {
 // Deprecated: use DefaultActorManagerContext instead.
 type DefaultActorManager struct {
 	ctx ActorManagerContext
+	// activeActors stores the map actorID -> ActorContainer
+	activeActors sync.Map
 }
 
 // Deprecated: use DefaultActorManagerContext instead.
@@ -113,6 +117,47 @@ func (m *DefaultActorManager) InvokeTimer(actorID, timerName string, params []by
 	return m.ctx.InvokeTimer(context.Background(), actorID, timerName, params)
 }
 
+func (m *DefaultActorManager) InvokeActors(methodName string, request []byte) actorErr.ActorErr {
+	m.activeActors.Range(func(key, value interface{}) bool {
+		return func() bool {
+			go func() {
+				defer func() {
+					if err := recover(); err != nil {
+						log.Printf("InvokeActors recover, methodName:%s, request:%s", methodName, string(request))
+					}
+				}()
+				out, err := m.InvokeMethod(key.(string), methodName, request)
+				if err != actorErr.Success {
+					log.Printf("InvokeActors, methodName:%s, request:%s, out:%s, err:%v", methodName, string(request), string(out), err)
+				}
+			}()
+			return true
+		}()
+	})
+	return actorErr.Success
+}
+
+func (m *DefaultActorManager) KillAllActors() actorErr.ActorErr {
+	var actorIds []string
+	m.activeActors.Range(func(key, value interface{}) bool {
+		return func() bool {
+			actorIds = append(actorIds, key.(string))
+			return true
+		}()
+	})
+	for _, actorId := range actorIds {
+		func() {
+			defer func() {
+				if err := recover(); err != nil {
+					log.Printf("KillAllActors recover, actorId:%s", actorId)
+				}
+			}()
+			m.DeactivateActor(actorId)
+		}()
+	}
+	return actorErr.Success
+}
+
 func NewDefaultActorManagerContext(serializerType string) (ActorManagerContext, actorErr.ActorErr) {
 	serializer, err := codec.GetActorCodec(serializerType)
 	if err != nil {
@@ -141,7 +186,7 @@ func (m *DefaultActorManagerContext) getAndCreateActorContainerIfNotExist(ctx co
 			return nil, actorErr.ErrSaveStateFailed
 		}
 		// save state of this actor
-		err = newContainer.GetActor().SaveState()
+		err = newContainer.GetActor().SaveState(ctx)
 		if err != nil {
 			return nil, actorErr.ErrSaveStateFailed
 		}
@@ -198,7 +243,7 @@ func (m *DefaultActorManagerContext) DeactivateActor(_ context.Context, actorID 
 	if !ok {
 		return actorErr.ErrActorIDNotFound
 	}
-	actor.(ActorContainer).Deactivate()
+	//actor.(ActorContainerContext).Deactivate()
 	m.activeActors.Delete(actorID)
 	return actorErr.Success
 }
@@ -244,7 +289,7 @@ func (m *DefaultActorManagerContext) InvokeTimer(ctx context.Context, actorID, t
 	return aerr
 }
 
-func (m *DefaultActorManager) InvokeActors(methodName string, request []byte) actorErr.ActorErr {
+func (m *DefaultActorManagerContext) InvokeActors(methodName string, request []byte) actorErr.ActorErr {
 	m.activeActors.Range(func(key, value interface{}) bool {
 		return func() bool {
 			go func() {
@@ -253,7 +298,7 @@ func (m *DefaultActorManager) InvokeActors(methodName string, request []byte) ac
 						log.Printf("InvokeActors recover, methodName:%s, request:%s", methodName, string(request))
 					}
 				}()
-				out, err := m.InvokeMethod(key.(string), methodName, request)
+				out, err := m.InvokeMethod(context.Background(), key.(string), methodName, request)
 				if err != actorErr.Success {
 					log.Printf("InvokeActors, methodName:%s, request:%s, out:%s, err:%v", methodName, string(request), string(out), err)
 				}
@@ -264,7 +309,7 @@ func (m *DefaultActorManager) InvokeActors(methodName string, request []byte) ac
 	return actorErr.Success
 }
 
-func (m *DefaultActorManager) KillAllActors() actorErr.ActorErr {
+func (m *DefaultActorManagerContext) KillAllActors() actorErr.ActorErr {
 	var actorIds []string
 	m.activeActors.Range(func(key, value interface{}) bool {
 		return func() bool {
@@ -279,7 +324,7 @@ func (m *DefaultActorManager) KillAllActors() actorErr.ActorErr {
 					log.Printf("KillAllActors recover, actorId:%s", actorId)
 				}
 			}()
-			m.DeactivateActor(actorId)
+			m.DeactivateActor(context.Background(), actorId)
 		}()
 	}
 	return actorErr.Success

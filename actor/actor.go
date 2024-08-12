@@ -46,7 +46,7 @@ type Server interface {
 	Activate(invokeName string) error
 	// Deactivate called before actor removed by actor manager
 	Deactivate() error
-	
+
 	WithContext() ServerContext
 }
 
@@ -68,6 +68,12 @@ type ServerContext interface {
 	// SaveState is impl by ServerImplBase, It saves the state cache of this actor instance to state store component by calling api of daprd.
 	// Save state is called at two places: 1. On invocation of this actor instance. 2. When new actor starts.
 	SaveState(context.Context) error
+
+	Activate(invokeName string) error
+	// Deactivate called before actor removed by actor manager
+	Deactivate() error
+
+	WithContext() ServerContext
 }
 
 type ReminderCallee interface {
@@ -91,6 +97,10 @@ type ServerImplBaseCtx struct {
 	once         sync.Once
 	id           string
 	lock         sync.RWMutex
+}
+
+func (s *ServerImplBaseCtx) WithContext() ServerContext {
+	return nil
 }
 
 // Deprecated: Use ServerImplBaseCtx instead.
@@ -182,6 +192,11 @@ func (b *ServerImplBaseCtx) SaveState(ctx context.Context) error {
 
 	return nil
 }
+
+// Deprecated: Use ServerImplBaseCtx instead.
+/*func (b *ServerImplBaseCtx) WithContext() ServerContext {
+	return b.WithContext()
+}*/
 
 // Deprecated: StateManager is deprecated in favour of StateManagerContext.
 type StateManager interface {
